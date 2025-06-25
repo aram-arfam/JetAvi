@@ -1,0 +1,971 @@
+awb selector
+import { useState, useEffect } from "react";
+
+const AWBSelector = ({ awbs, setSelectedAWBs }) => {
+  const [selected, setSelected] = useState({});
+
+  // Toggle individual selection
+  const toggleSelection = (id) => {
+    setSelected((prev) => ({
+      ...prev,
+      [id]: !prev[id],
+    }));
+  };
+
+  // Select all / Deselect all
+  const toggleSelectAll = () => {
+    const allSelected = Object.keys(selected).length === awbs.length;
+    if (allSelected) {
+      setSelected({});
+    } else {
+      const newSelection = awbs.reduce((acc, awb) => {
+        acc[awb.id] = true;
+        return acc;
+      }, {});
+      setSelected(newSelection);
+    }
+  };
+
+  // Get selected AWBs array
+  const selectedAWBs = awbs.filter((awb) => selected[awb.id]);
+
+  // **Update parent state when selection changes**
+  useEffect(() => {
+    setSelectedAWBs(selectedAWBs);
+  }, [selected]);
+
+  // Calculate totals
+  const totalPcs = selectedAWBs.length;
+  const totalWeight = selectedAWBs.reduce((sum, awb) => sum + awb.weight, 0);
+  const totalVolume = selectedAWBs.reduce((sum, awb) => sum + awb.volume, 0);
+
+  return (
+    <div className="bg-gray-900 p-4 rounded-lg">
+      <div className="flex items-center justify-between mb-3">
+        <button
+          onClick={toggleSelectAll}
+          className="bg-yellow-500 text-black px-3 py-1 rounded"
+        >
+          {Object.keys(selected).length === awbs.length
+            ? "Deselect All"
+            : "Select All"}
+        </button>
+        <span className="text-yellow-400 font-bold">
+          {totalPcs} pcs | {totalWeight.toFixed(2)} kg |{" "}
+          {totalVolume.toFixed(2)} m³
+        </span>
+      </div>
+
+      {/* AWB List with Checkboxes */}
+      <div className="overflow-y-auto max-h-60 bg-gray-800 p-2 rounded">
+        {awbs.map((awb) => (
+          <div
+            key={awb.id}
+            className="flex items-center justify-between p-2 border-b border-gray-700"
+          >
+            <label className="flex items-center space-x-2">
+              <input
+                type="checkbox"
+                checked={!!selected[awb.id]}
+                onChange={() => toggleSelection(awb.id)}
+                className="form-checkbox h-5 w-5 text-yellow-500"
+              />
+              <span className="text-white">AWB {awb.id}</span>
+            </label>
+            <span className="text-gray-400 text-sm">
+              {awb.weight} kg | {awb.volume} m³
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+export default AWBSelector;
+
+-------------
+
+awb table :
+
+import React from "react";
+import PropTypes from "prop-types";
+import ExcelJS from "exceljs";
+import { saveAs } from "file-saver";
+import { toast } from "react-toastify";
+
+const AwbTable = ({ data, searchQuery, selectedAWBs, onSelectionChange }) => {
+  const formatDateTime = (date) => {
+    return date
+      ? new Date(date)
+          .toLocaleString("en-GB", {
+            day: "2-digit",
+            month: "2-digit",
+            year: "numeric",
+            hour: "2-digit",
+            minute: "2-digit",
+            hour12: false,
+          })
+          .replace(",", " -")
+      : "N/A";
+  };
+
+  const highlightText = (text, searchQuery) => {
+    if (!searchQuery || !text) return text;
+
+    // Convert to string if not already
+    const textStr = text.toString();
+    const searchTerms = searchQuery.toLowerCase().split(/\s+/).filter(Boolean);
+
+    if (searchTerms.length === 0) return textStr;
+
+    // Create a regex pattern that matches any of the search terms
+    const pattern = searchTerms.map((term) => `(${term})`).join("|");
+    const regex = new RegExp(pattern, "gi");
+
+    const parts = textStr.split(regex);
+
+    return parts.map((part, index) => {
+      // Check if this part matches any of the search terms
+      const isMatch = searchTerms.some(
+        (term) => part.toLowerCase() === term.toLowerCase()
+      );
+
+      return isMatch ? (
+        <span key={index} className="bg-yellow-500 text-gray-900 font-bold">
+          {part}
+        </span>
+      ) : (
+        part
+      );
+    });
+  };
+
+  const toggleSelection = (awbNo) => {
+    const newSelection = { ...selectedAWBs };
+    if (newSelection[awbNo]) {
+      delete newSelection[awbNo];
+    } else {
+      newSelection[awbNo] = true;
+    }
+    onSelectionChange(newSelection);
+  };
+
+  const toggleSelectAll = () => {
+    const allSelected = data.every((awb) => selectedAWBs[awb.awbNo]);
+    if (allSelected) {
+      onSelectionChange({});
+    } else {
+      const newSelection = data.reduce((acc, awb) => {
+        acc[awb.awbNo] = true;
+        return acc;
+      }, {});
+      onSelectionChange(newSelection);
+    }
+  };
+
+  const handleExport = async () => {
+    try {
+      const selectedData = data.filter((awb) => selectedAWBs[awb.awbNo]);
+      if (selectedData.length === 0) {
+        toast.warning("Please select AWBs to export");
+        return;
+      }
+
+      const workbook = new ExcelJS.Workbook();
+      const worksheet = workbook.addWorksheet("AWBs");
+
+      // Define columns
+      const columns = [
+        "MAWB No",
+        "AWB No",
+        "Customer",
+        "Company",
+        "Agent/Broker",
+        "Origin",
+        "Destination",
+        "Delivery",
+        "Status",
+        "Pieces",
+        "Weight",
+        "Chargeable Weight",
+        "Volume",
+        "Ready Date",
+        "Arrival Date",
+        "Weight Discrepancy",
+        "Priority Shipment",
+        "Quality Check",
+        "Freight Charges",
+        "Customs Clearance",
+        "Insurance",
+        "Special Handling",
+        "Approval Status",
+        "Created At",
+      ];
+
+      worksheet.addRow(columns);
+
+      // Add data rows
+      selectedData.forEach((awb) => {
+        worksheet.addRow([
+          awb.mawbNo,
+          awb.awbNo,
+          awb.customer,
+          awb.company,
+          awb.agentBroker,
+          awb.origin,
+          awb.destination,
+          awb.delivery,
+          awb.status,
+          awb.pieces,
+          awb.weight,
+          awb.chargeableWeight,
+          awb.volume,
+          formatDateTime(awb.readyDate),
+          formatDateTime(awb.arrivalDate),
+          awb.weightDiscrepancy ? "Yes" : "No",
+          awb.priorityShipment ? "Yes" : "No",
+          awb.qualityCheck ? "Yes" : "No",
+          awb.freightCharges ? "Yes" : "No",
+          awb.customsClearance ? "Yes" : "No",
+          awb.insurance ? "Yes" : "No",
+          awb.specialHandling ? "Yes" : "No",
+          awb.approvalStatus,
+          formatDateTime(awb.createdAt),
+        ]);
+      });
+
+      const buffer = await workbook.xlsx.writeBuffer();
+      const blob = new Blob([buffer], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      });
+      saveAs(
+        blob,
+        `AWBs_Export_${new Date().toISOString().split("T")[0]}.xlsx`
+      );
+      toast.success("Export completed successfully!");
+    } catch (error) {
+      console.error("Export error:", error);
+      toast.error("Failed to export data");
+    }
+  };
+
+  const handleCopy = () => {
+    try {
+      const selectedData = data.filter((awb) => selectedAWBs[awb.awbNo]);
+      if (selectedData.length === 0) {
+        toast.warning("Please select AWBs to copy");
+        return;
+      }
+
+      // Define the fields to copy with their labels
+      const fields = [
+        { key: "mawbNo", label: "MAWB" },
+        { key: "awbNo", label: "AWB" },
+        { key: "customer", label: "Customer" },
+        { key: "company", label: "Company" },
+        { key: "agentBroker", label: "Agent/Broker" },
+        { key: "origin", label: "Origin" },
+        { key: "destination", label: "Destination" },
+        { key: "delivery", label: "Delivery" },
+        { key: "status", label: "Status" },
+        { key: "pieces", label: "Pieces" },
+        { key: "weight", label: "Weight" },
+        { key: "chargeableWeight", label: "Chargeable Weight" },
+        { key: "volume", label: "Volume" },
+        { key: "readyDate", label: "Ready Date" },
+        { key: "arrivalDate", label: "Arrival Date" },
+        { key: "weightDiscrepancy", label: "Weight Discrepancy" },
+        { key: "priorityShipment", label: "Priority" },
+        { key: "qualityCheck", label: "Quality Check" },
+        { key: "freightCharges", label: "Freight Charges" },
+        { key: "customsClearance", label: "Customs Clearance" },
+        { key: "insurance", label: "Insurance" },
+        { key: "specialHandling", label: "Special Handling" },
+        { key: "approvalStatus", label: "Approval Status" },
+      ];
+
+      // Create formatted rows for each AWB
+      const formattedData = selectedData.map((awb) => {
+        const awbDetails = fields
+          .map((field) => {
+            let value = awb[field.key];
+
+            // Format special values
+            if (typeof value === "boolean") {
+              value = value ? "Yes" : "No";
+            } else if (
+              field.key === "readyDate" ||
+              field.key === "arrivalDate"
+            ) {
+              value = formatDateTime(value);
+            } else if (
+              field.key === "weight" ||
+              field.key === "chargeableWeight" ||
+              field.key === "volume"
+            ) {
+              value = value
+                ? value.toString() + (field.key === "volume" ? " m³" : " kg")
+                : "";
+            }
+
+            return `${field.label}: ${value || "N/A"}`;
+          })
+          .join(" | ");
+
+        return awbDetails;
+      });
+
+      // Join all AWBs with double line breaks
+      const copyText = formattedData.join("\n\n");
+
+      navigator.clipboard.writeText(copyText);
+      toast.success(`Copied ${selectedData.length} AWBs to clipboard!`);
+    } catch (error) {
+      console.error("Copy error:", error);
+      toast.error("Failed to copy data");
+    }
+  };
+
+  return (
+    <div className="overflow-x-auto">
+      {/* Hidden buttons for parent component to trigger actions */}
+      <button data-copy-btn onClick={handleCopy} className="hidden" />
+      <button data-export-btn onClick={handleExport} className="hidden" />
+
+      <table className="w-full border-collapse border border-gray-600 text-white">
+        <thead>
+          <tr className="bg-gray-700 text-yellow-500">
+            <th className="border border-gray-600 p-2 sticky left-0 z-10 bg-gray-700">
+              <input
+                type="checkbox"
+                onChange={toggleSelectAll}
+                checked={
+                  data.length > 0 &&
+                  data.every((awb) => selectedAWBs[awb.awbNo])
+                }
+                className="cursor-pointer w-4 h-4"
+              />
+            </th>
+            {[
+              "MAWB No",
+              "AWB No",
+              "Customer",
+              "Company",
+              "Agent/Broker",
+              "Origin",
+              "Destination",
+              "Delivery",
+              "Status",
+              "Pieces",
+              "Weight",
+              "Chargeable Weight",
+              "Volume",
+              "Ready Date",
+              "Arrival Date",
+              "W",
+              "P",
+              "Q",
+              "F",
+              "C. Clearance",
+              "Ins",
+              "Sp. Handling",
+              "App. Status",
+              "Created At",
+            ].map((header) => (
+              <th
+                key={header}
+                className="border border-gray-600 p-2 whitespace-nowrap"
+              >
+                {header}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {data.length > 0 ? (
+            data.map((awb) => (
+              <tr
+                key={awb.awbNo}
+                className={`border border-gray-600 hover:bg-gray-800 transition-colors ${
+                  selectedAWBs[awb.awbNo] ? "bg-gray-800" : ""
+                }`}
+              >
+                <td className="border border-gray-600 p-2 text-center sticky left-0 z-10 bg-gray-900">
+                  <input
+                    type="checkbox"
+                    checked={!!selectedAWBs[awb.awbNo]}
+                    onChange={() => toggleSelection(awb.awbNo)}
+                    className="cursor-pointer w-4 h-4"
+                  />
+                </td>
+                {[
+                  awb.mawbNo,
+                  awb.awbNo,
+                  awb.customer,
+                  awb.company,
+                  awb.agentBroker,
+                  awb.origin,
+                  awb.destination,
+                  awb.delivery,
+                  awb.status,
+                  awb.pieces,
+                  awb.weight,
+                  awb.chargeableWeight,
+                  awb.volume,
+                  formatDateTime(awb.readyDate),
+                  formatDateTime(awb.arrivalDate),
+                  awb.weightDiscrepancy,
+                  awb.priorityShipment,
+                  awb.qualityCheck,
+                  awb.freightCharges,
+                  awb.customsClearance,
+                  awb.insurance,
+                  awb.specialHandling,
+                  awb.approvalStatus,
+                  formatDateTime(awb.createdAt),
+                ].map((value, index) => (
+                  <td
+                    key={index}
+                    className="border border-gray-600 p-2 whitespace-nowrap"
+                  >
+                    {typeof value === "boolean"
+                      ? value
+                        ? "✅"
+                        : "❌"
+                      : highlightText(value, searchQuery)}
+                  </td>
+                ))}
+              </tr>
+            ))
+          ) : (
+            <tr>
+              <td colSpan="24" className="text-center p-4 text-gray-400">
+                No AWBs found
+              </td>
+            </tr>
+          )}
+        </tbody>
+      </table>
+    </div>
+  );
+};
+
+AwbTable.propTypes = {
+  data: PropTypes.arrayOf(
+    PropTypes.shape({
+      awbNo: PropTypes.string.isRequired,
+      mawbNo: PropTypes.string,
+      customer: PropTypes.string,
+      company: PropTypes.string,
+      agentBroker: PropTypes.string,
+      origin: PropTypes.string,
+      destination: PropTypes.string,
+      delivery: PropTypes.string,
+      status: PropTypes.string,
+      pieces: PropTypes.number,
+      weight: PropTypes.number,
+      chargeableWeight: PropTypes.number,
+      volume: PropTypes.number,
+      readyDate: PropTypes.string,
+      arrivalDate: PropTypes.string,
+      createdAt: PropTypes.string,
+    })
+  ).isRequired,
+  searchQuery: PropTypes.string,
+  selectedAWBs: PropTypes.object.isRequired,
+  onSelectionChange: PropTypes.func.isRequired,
+};
+
+AwbTable.defaultProps = {
+  searchQuery: "",
+};
+
+export default AwbTable;
+
+
+----------
+
+status filter :
+
+import { useState, useEffect } from "react";
+
+const statusOptions = [
+  { key: "Request", label: "REQUEST" },
+  { key: "Waiting", label: "WAITING" },
+  { key: "Not-Complete", label: "NOT-COMPLETE" },
+  { key: "Planned", label: "PLANNED" },
+  { key: "Unplanned", label: "UNPLANNED" },
+  { key: "Off-Loaded", label: "OFF-LOADED" },
+  { key: "Departure", label: "DEPARTURE" },
+  { key: "Transit", label: "TRANSIT" },
+  { key: "Arrival", label: "ARRIVAL" },
+  { key: "Forward", label: "FORWARD" },
+  { key: "POD", label: "POD" },
+  { key: "Standby", label: "STANDBY" },
+  { key: "Missing", label: "MISSING" },
+  { key: "Canceled", label: "CANCELED" },
+];
+
+// Normalize status to match DB format (convert to lowercase with hyphens)
+const normalizeStatus = (status) =>
+  status
+    .toLowerCase()
+    .replace(/([A-Z])/g, "-$1")
+    .replace(/_/g, "-");
+
+const StatusFilter = ({ awbs, setFilteredAwbs }) => {
+  const [selectedStatuses, setSelectedStatuses] = useState(
+    statusOptions.reduce((acc, status) => {
+      acc[status.key] = false;
+      return acc;
+    }, {})
+  );
+
+  const [filteredCount, setFilteredCount] = useState(awbs.length);
+
+  useEffect(() => {
+    filterAwbs();
+  }, [selectedStatuses, awbs]); // Ensure it updates when `awbs` change
+
+  const handleStatusChange = (key) => {
+    setSelectedStatuses((prev) => ({
+      ...prev,
+      [key]: !prev[key],
+    }));
+  };
+
+  const filterAwbs = () => {
+    const activeStatuses = Object.entries(selectedStatuses)
+      .filter(([_, isChecked]) => isChecked)
+      .map(([key]) => key); // Keep as-is since `statusOptions` now matches DB
+
+    const filtered = activeStatuses.length
+      ? awbs.filter((awb) => activeStatuses.includes(awb.status))
+      : awbs;
+
+    setFilteredAwbs(filtered);
+    setFilteredCount(filtered.length);
+  };
+
+  return (
+    <div className="flex gap-4 flex-wrap bg-gray-800 p-3 rounded-lg">
+      {statusOptions.map(({ key, label }) => (
+        <label key={key} className="flex items-center gap-1 text-yellow-400">
+          <input
+            type="checkbox"
+            checked={selectedStatuses[key]}
+            onChange={() => handleStatusChange(key)}
+            className="w-4 h-4 text-yellow-500 bg-gray-900 border-gray-600 rounded"
+          />
+          {label}
+        </label>
+      ))}
+
+      <div className="text-yellow-400 font-bold">
+        Showing {filteredCount} result{filteredCount !== 1 ? "s" : ""}
+      </div>
+    </div>
+  );
+};
+
+export default StatusFilter;
+
+
+------------
+
+
+use cargo form:
+import { useState, useEffect, useContext } from "react";
+import axios from "axios";
+import { AviContext } from "../Context/AviContext";
+import { toast } from "react-toastify";
+
+const useCargoForm = () => {
+  const { backendUrl } = useContext(AviContext);
+  const [savedAwbData, setSavedAwbData] = useState(null);
+  const [formData, setFormData] = useState({
+    mawbNo: "",
+    awbNo: "",
+    customer: "",
+    company: "",
+    agentBroker: "",
+    origin: "",
+    destination: "",
+    delivery: "Airport Pickup",
+    pieces: "",
+    weight: "",
+    chargeableWeight: "",
+    volume: "",
+    readyDate: "",
+    arrivalDate: "",
+    weightDiscrepancy: false,
+    priorityShipment: false,
+    qualityCheck: false,
+    freightCharges: false,
+    status: "Request",
+    customsClearance: "Pending",
+    insurance: "Paid",
+    specialHandling: "No",
+    approvalStatus: "Pending",
+  });
+
+  const [isModalOpen, setIsModalOpen] = useState(false);
+
+  // Fetch generated MAWB & AWB numbers on mount
+  useEffect(() => {
+    const fetchGeneratedNumbers = async () => {
+      try {
+        const response = await axios.post(`${backendUrl}/api/awbs/generate`);
+        setFormData((prev) => ({
+          ...prev,
+          mawbNo: response.data.mawbNo,
+          awbNo: response.data.awbNo,
+        }));
+      } catch (error) {
+        console.error("Error generating numbers:", error);
+      }
+    };
+
+    fetchGeneratedNumbers();
+  }, [backendUrl]);
+
+  // Handle input change
+  const handleChange = (e) => {
+    const { name, value, type, checked } = e.target;
+    setFormData((prev) => ({
+      ...prev,
+      [name]: type === "checkbox" ? checked : value,
+    }));
+  };
+
+  // Handle form submission
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    try {
+      const response = await axios.post(`${backendUrl}/api/awbs/`, formData);
+      console.log("AWB created:", response.data);
+      setSavedAwbData(response.data.data);
+      toast.success("AWB created successfully!");
+      setTimeout(() => setIsModalOpen(true), 150);
+    } catch (error) {
+      console.log(error);
+      toast.error(
+        error.response?.data?.message ||
+          "Failed to create AWB. Please try again."
+      );
+    }
+  };
+
+  return {
+    formData,
+    setFormData,
+    handleChange,
+    handleSubmit,
+    isModalOpen,
+    setIsModalOpen,
+    savedAwbData,
+  };
+};
+
+export default useCargoForm;
+------
+
+
+
+prisison filter:
+
+import React from "react";
+import SearchBar from "./SearchBar";
+
+const PrecisionFilters = ({
+  awbSearch,
+  setAwbSearch,
+  customerSearch,
+  setCustomerSearch,
+  originSearch,
+  setOriginSearch,
+  destinationSearch,
+  setDestinationSearch,
+  startDate,
+  setStartDate,
+  endDate,
+  setEndDate,
+}) => {
+  return (
+    <div className="grid grid-cols-5 gap-4 mb-4">
+      <SearchBar
+        label="AWB No"
+        placeholder="Search by AWB No"
+        value={awbSearch}
+        onChange={(e) => setAwbSearch(e.target.value)}
+      />
+      <SearchBar
+        label="Customer"
+        placeholder="Search by Customer"
+        value={customerSearch}
+        onChange={(e) => setCustomerSearch(e.target.value)}
+      />
+      <SearchBar
+        label="Origin"
+        placeholder="Search by Origin"
+        value={originSearch}
+        onChange={(e) => setOriginSearch(e.target.value)}
+      />
+      <SearchBar
+        label="Destination"
+        placeholder="Search by Destination"
+        value={destinationSearch}
+        onChange={(e) => setDestinationSearch(e.target.value)}
+      />
+      <div className="flex gap-2">
+        <div className="flex flex-col w-full">
+          <label className="mb-1 text-yellow-400 text-sm">From</label>
+          <input
+            type="date"
+            value={startDate}
+            onChange={(e) => setStartDate(e.target.value)}
+            className="p-2 bg-gray-700 text-white border border-gray-600 rounded-lg w-full"
+          />
+        </div>
+        <div className="flex flex-col w-full">
+          <label className="mb-1 text-yellow-400 text-sm">To</label>
+          <input
+            type="date"
+            value={endDate}
+            onChange={(e) => setEndDate(e.target.value)}
+            className="p-2 bg-gray-700 text-white border border-gray-600 rounded-lg w-full"
+          />
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default PrecisionFilters;
+
+------
+
+
+sleect field:
+
+
+const SelectField = ({ label, name, value, onChange, options }) => {
+  return (
+    <div>
+      <label className="block text-yellow-500 mb-1">{label}</label>
+      <select
+        name={name}
+        value={value}
+        onChange={onChange}
+        className="p-2 bg-gray-800 rounded border border-gray-700 text-white w-full"
+      >
+        {options.map((option) => (
+          <option key={option} value={option}>
+            {option}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+};
+
+export default SelectField;
+
+
+-------
+
+awb data base:
+
+import React, { useState, useEffect, useContext } from "react";
+import { AviContext } from "../Context/AviContext";
+import axios from "axios";
+import { toast } from "react-toastify";
+import PrecisionFilters from "../components/PrecisionFilters";
+import UniversalSearch from "../components/UniversalSearch";
+import AwbTable from "../components/AwbTable";
+import StatusFilter from "../components/StatusFilter";
+
+const AwbDatabase = () => {
+  const { backendUrl } = useContext(AviContext);
+  const [awbsData, setAwbsData] = useState([]);
+  const [filteredData, setFilteredData] = useState([]);
+  const [selectedAWBs, setSelectedAWBs] = useState({});
+
+  // Search States
+  const [awbSearch, setAwbSearch] = useState("");
+  const [customerSearch, setCustomerSearch] = useState("");
+  const [originSearch, setOriginSearch] = useState("");
+  const [destinationSearch, setDestinationSearch] = useState("");
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
+  const [universalSearch, setUniversalSearch] = useState("");
+
+  useEffect(() => {
+    fetchAwbs();
+  }, [backendUrl]);
+
+  const fetchAwbs = async () => {
+    try {
+      const response = await axios.get(`${backendUrl}/api/awbs/`);
+      setAwbsData(response.data.data);
+      setFilteredData(response.data.data);
+    } catch (error) {
+      toast.error(error.response?.data?.message || "Error fetching data");
+      setAwbsData([]);
+      setFilteredData([]);
+    }
+  };
+
+  useEffect(() => {
+    let filtered = awbsData.filter((awb) => {
+      const normalize = (value) => value?.toString().toLowerCase() || "";
+      const originParts = normalize(awb.origin).split("-");
+      const destinationParts = normalize(awb.destination).split("-");
+
+      // Ensure dates are correctly parsed
+      const awbReadyDate = awb.readyDate ? new Date(awb.readyDate) : null;
+      const awbArrivalDate = awb.arrivalDate ? new Date(awb.arrivalDate) : null;
+      const filterStartDate = startDate
+        ? new Date(startDate + "T00:00:00")
+        : null;
+      const filterEndDate = endDate ? new Date(endDate + "T23:59:59") : null;
+
+      const dateMatch =
+        (!filterStartDate ||
+          (awbReadyDate && awbReadyDate >= filterStartDate)) &&
+        (!filterEndDate || (awbReadyDate && awbReadyDate <= filterEndDate)) &&
+        (!filterStartDate ||
+          (awbArrivalDate && awbArrivalDate >= filterStartDate)) &&
+        (!filterEndDate || (awbArrivalDate && awbArrivalDate <= filterEndDate));
+
+      return (
+        (!awbSearch || normalize(awb.awbNo).includes(normalize(awbSearch))) &&
+        (!customerSearch ||
+          normalize(awb.customer).includes(normalize(customerSearch))) &&
+        (!originSearch ||
+          originParts.some((part) => part.includes(normalize(originSearch)))) &&
+        (!destinationSearch ||
+          destinationParts.some((part) =>
+            part.includes(normalize(destinationSearch))
+          )) &&
+        dateMatch
+      );
+    });
+
+    if (universalSearch) {
+      const lowerUniversalSearch = universalSearch.toLowerCase();
+      filtered = filtered.filter((awb) =>
+        Object.values(awb).some((value) =>
+          value?.toString().toLowerCase().includes(lowerUniversalSearch)
+        )
+      );
+    }
+    setFilteredData(filtered);
+  }, [
+    awbSearch,
+    customerSearch,
+    originSearch,
+    destinationSearch,
+    startDate,
+    endDate,
+    universalSearch,
+    awbsData,
+  ]);
+
+  // Calculate selected AWBs totals
+  const selectedCount = filteredData.filter(
+    (awb) => selectedAWBs[awb.awbNo]
+  ).length;
+  const selectedTotalWeight = filteredData
+    .filter((awb) => selectedAWBs[awb.awbNo])
+    .reduce((sum, awb) => sum + (awb.weight || 0), 0);
+  const selectedTotalVolume = filteredData
+    .filter((awb) => selectedAWBs[awb.awbNo])
+    .reduce((sum, awb) => sum + (awb.volume || 0), 0);
+
+  // Clear selections when data changes
+  useEffect(() => {
+    setSelectedAWBs({});
+  }, [awbsData]);
+
+  // Combine all search terms
+  const getSearchQuery = () => {
+    const terms = [
+      universalSearch,
+      awbSearch,
+      customerSearch,
+      originSearch,
+      destinationSearch,
+    ].filter(Boolean);
+
+    return terms.join(" ");
+  };
+
+  return (
+    <div className="p-6 bg-gray-900 text-white min-h-screen relative">
+      <div className="flex justify-between items-center mb-4">
+        <h1 className="text-2xl text-yellow-400 font-bold">AWB Database</h1>
+
+        {/* Action buttons - only show when items are selected */}
+        {selectedCount > 0 && (
+          <div className="flex items-center gap-4">
+            <div className="bg-gray-800 px-4 py-2 rounded-lg">
+              <span className="text-yellow-400 font-bold">
+                Selected: {selectedCount} AWBs | Weight:{" "}
+                {selectedTotalWeight.toFixed(2)} kg | Volume:{" "}
+                {selectedTotalVolume.toFixed(2)} m³
+              </span>
+            </div>
+            <button
+              onClick={() => document.querySelector("[data-copy-btn]").click()}
+              className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600 transition flex items-center gap-2"
+            >
+              <span>📋</span> Copy
+            </button>
+            <button
+              onClick={() =>
+                document.querySelector("[data-export-btn]").click()
+              }
+              className="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 transition flex items-center gap-2"
+            >
+              <span>📥</span> Export
+            </button>
+          </div>
+        )}
+      </div>
+
+      <div className="space-y-4">
+        <PrecisionFilters
+          {...{
+            awbSearch,
+            setAwbSearch,
+            customerSearch,
+            setCustomerSearch,
+            originSearch,
+            setOriginSearch,
+            destinationSearch,
+            setDestinationSearch,
+            startDate,
+            setStartDate,
+            endDate,
+            setEndDate,
+          }}
+        />
+        <UniversalSearch {...{ universalSearch, setUniversalSearch }} />
+        <StatusFilter awbs={awbsData} setFilteredAwbs={setFilteredData} />
+
+        <AwbTable
+          data={filteredData}
+          searchQuery={getSearchQuery()}
+          selectedAWBs={selectedAWBs}
+          onSelectionChange={setSelectedAWBs}
+        />
+      </div>
+    </div>
+  );
+};
+
+export default AwbDatabase;
+
+
